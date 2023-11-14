@@ -1,0 +1,58 @@
+import tensorflow as tf
+
+num_spatial_features = 5830
+num_classes = 5
+
+def spatial_transformer_model(input_shape, num_spatial_features, num_classes):
+    inputs = tf.keras.Input(shape=input_shape)
+    
+    # Localization network to predict transformation parameters
+    loc_net = tf.keras.layers.Dense(num_spatial_features * 2, activation='relu')(inputs)
+    
+    # Reshape loc_net output to spatial transformation parameters
+    theta = tf.keras.layers.Reshape((num_spatial_features, 2))(loc_net)
+    
+    # Generate grid transformation for 1D input
+    def apply_transformation(x):
+        x_input, theta_input = x
+        x_input = tf.expand_dims(x_input, axis=-1)  # Add channel dimension for compatibility
+        
+        # Transpose theta_input before matrix multiplication
+        transformed = tf.matmul(tf.transpose(theta_input, perm=[0, 2, 1]), x_input)
+        
+        return tf.squeeze(transformed, axis=-1)  # Remove added dimension
+    
+    transformed_input = tf.keras.layers.Lambda(apply_transformation)([inputs, theta])
+
+    # Spatial Transformer Encoder
+    spatial_encoder = tf.keras.layers.Dense(512, activation='relu')(transformed_input)
+    spatial_encoder = tf.keras.layers.Dense(256, activation='relu')(spatial_encoder)
+    
+    # Output layer
+    outputs = tf.keras.layers.Dense(num_classes, activation='softmax')(spatial_encoder)
+    
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    return model
+
+# Define the input shape and number of spatial features
+input_shape = (5830)
+
+# Create an instance of the Spatial Transformer model
+model = spatial_transformer_model(input_shape, num_spatial_features, num_classes)
+
+# Compile the model with a learning rate scheduler
+initial_learning_rate = 0.001
+lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate,
+    decay_steps=10000,
+    decay_rate=0.96,
+    staircase=True
+)
+optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+model.compile(loss='categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
+
+# Implement early stopping
+early_stopping = tf.keras.callbacks.EarlyStopping(patience=20, restore_best_weights=True)
+
+# Train the model
+history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=100, batch_size=32, callbacks=[early_stopping])
